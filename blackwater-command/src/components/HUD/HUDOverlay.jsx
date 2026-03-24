@@ -4,6 +4,7 @@ import{handleCommand,indraVoice,speakReactive,runSceneDialogue}from'../../system
 import{voiceInput}from'../../systems/VoiceInput'
 import{submarineAudio}from'../../systems/AudioManager'
 import PeriscopeOverlay from '../Interior/PeriscopeOverlay'
+import QuestHUD, { IS_TOUCH } from './QuestHUD'
 
 function AIDialogue(){
   const msgs=useGameStore(s=>s.aiMessages);const ref=useRef()
@@ -52,13 +53,10 @@ function WeaponsPanel(){
   const ft=useGameStore(s=>s.fireTorpedo),fb=useGameStore(s=>s.fireBrahMos),dd=useGameStore(s=>s.deployDecoy)
   const contacts=useGameStore(s=>s.contacts),tif=useGameStore(s=>s.torpedoInFlight),bif=useGameStore(s=>s.brahmoInFlight)
   const periscopeMode=useGameStore(s=>s.periscopeMode)
-
-  // Hide weapons panel when in periscope mode (overlay takes over)
-  if(periscopeMode) return null
-
+  // Hide on Quest (QuestHUD weapons tab handles this) and periscope mode
+  if(periscopeMode||IS_TOUCH) return null
   const fireT=()=>{const t=contacts.find(c=>c.hostile&&c.tracked)||contacts.find(c=>c.hostile);if(t&&tc>0){ft(t.id);submarineAudio.playTorpedoLaunch();speakReactive('torpedoFired')}else{indraVoice.speak(tc<=0?"Tubes empty.":"No target. Press R to track.",'warning')}}
   const fireB=()=>{const t=contacts.find(c=>c.hostile&&c.tracked)||contacts.find(c=>c.hostile);if(t&&bm>0){fb(t.id);submarineAudio.playMissileLaunch();speakReactive('brahmosFired')}else{indraVoice.speak(bm<=0?"BrahMos empty.":"No target.",'warning')}}
-
   const Btn=({label,count,max,onClick,color,active,sub})=><button onClick={()=>{onClick();submarineAudio.playClick()}} style={{width:'100%',padding:'8px 10px',background:active?color+'25':'rgba(0,4,16,0.8)',border:'1px solid '+(count>0?color:'rgba(255,255,255,0.05)'),borderRadius:4,cursor:count>0?'pointer':'not-allowed',transition:'all 0.15s',textAlign:'left',opacity:count>0?1:0.4}}>
     <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
       <div>
@@ -69,7 +67,6 @@ function WeaponsPanel(){
     </div>
     <div style={{display:'flex',gap:2,marginTop:4}}>{Array.from({length:max},(_,i)=><div key={i} style={{flex:1,height:3,borderRadius:1,background:i<count?color:'rgba(255,255,255,0.05)',transition:'background 0.3s'}}/>)}</div>
   </button>
-
   return<div style={{position:'absolute',top:250,right:16,width:180,display:'flex',flexDirection:'column',gap:5}}>
     <div style={{fontFamily:'var(--font-display)',fontSize:8,color:'#ff1744',letterSpacing:3,textAlign:'center',padding:'4px 0'}}>WEAPONS</div>
     <Btn label="TORPEDO 533mm" count={tc} max={6} onClick={fireT} color="#ff1744" active={!!tif} sub="Heavyweight • Wire-guided"/>
@@ -83,12 +80,9 @@ function QuickActions(){
   const periscopeMode=useGameStore(s=>s.periscopeMode)
   const viewMode=useGameStore(s=>s.viewMode)
   const isInterior = viewMode === VIEW_MODES.INTERIOR || viewMode === 'interior'
-
+  // Hide on Quest (QuestHUD handles all of this) and periscope mode
+  if(periscopeMode||IS_TOUCH) return null
   const B=({label,onClick,color='#00e5ff',active=false})=><button onClick={()=>{onClick();submarineAudio.playSwitch()}} style={{padding:'5px 10px',background:active?color+'20':'rgba(0,4,16,0.8)',border:'1px solid '+(active?color:'rgba(0,229,255,0.15)'),borderRadius:3,color:active?color:'#b0bec5',fontFamily:'var(--font-mono)',fontSize:8,letterSpacing:1,cursor:'pointer',transition:'all 0.15s',textTransform:'uppercase',width:'100%'}}>{label}</button>
-
-  // Hide quick actions when scope is up (keep screen clear)
-  if(periscopeMode) return null
-
   return<div style={{position:'absolute',top:250,left:16,width:120,display:'flex',flexDirection:'column',gap:3}}>
     <div style={{fontFamily:'var(--font-display)',fontSize:8,color:'#00e5ff',letterSpacing:3,textAlign:'center',padding:'4px 0'}}>SYSTEMS</div>
     <B label="Stealth" onClick={()=>{store.setLightMode(LIGHT_MODES.STEALTH);speakReactive('lightChange',LIGHT_MODES.STEALTH)}} active={store.lightMode===LIGHT_MODES.STEALTH} color="#1b5e20"/>
@@ -99,15 +93,7 @@ function QuickActions(){
     <B label="Thermal" onClick={()=>{store.toggleThermal();speakReactive(useGameStore.getState().thermalEnabled?'thermalEnabled':'thermalDisabled')}} active={store.thermalEnabled} color="#ff6d00"/>
     <B label="Sonar Ping" onClick={()=>{store.triggerActiveSonar();speakReactive('sonarPing')}}/>
     <B label={'View: '+(store.viewMode==='interior'?'INT':'EXT')} onClick={()=>{const nv=store.viewMode==='interior'?'exterior':'interior';store.setViewMode(nv);speakReactive(nv==='exterior'?'exteriorView':'interiorView')}} color="#64ffda"/>
-    {/* Periscope button — only in interior */}
-    {isInterior && (
-      <B
-        label={'🔭 Periscope '+(periscopeMode?'ON':'OFF')}
-        onClick={()=>{store.togglePeriscope?.();speakReactive?.('periscopeUp')}}
-        active={periscopeMode}
-        color="#88ffaa"
-      />
-    )}
+    {isInterior&&<B label={'🔭 Periscope '+(periscopeMode?'ON':'OFF')} onClick={()=>{store.togglePeriscope?.();speakReactive?.('periscopeUp')}} active={periscopeMode} color="#88ffaa"/>}
     <B label="▶ Next Scene" onClick={()=>{store.advanceScene();setTimeout(()=>runSceneDialogue(useGameStore.getState().currentScene),900)}} color="#ffd600"/>
   </div>
 }
@@ -117,7 +103,8 @@ function CommandInput(){
   const periscopeMode=useGameStore(s=>s.periscopeMode)
   useEffect(()=>{voiceInput.onStateChange=a=>setVa(a);voiceInput.onTranscript=(t,f)=>{setTr(t);if(f)setTimeout(()=>setTr(''),2000)}},[])
   const submit=useCallback(e=>{e?.preventDefault();if(text.trim()){handleCommand(text.trim());setText('')}},[text])
-  if(periscopeMode) return null
+  // Hide on Quest (QuestHUD INDRA tab handles this) and periscope mode
+  if(periscopeMode||IS_TOUCH) return null
   return<div style={{position:'absolute',bottom:16,left:'50%',transform:'translateX(-50%)',display:'flex',gap:6,alignItems:'center',zIndex:100}}>
     <button onClick={()=>{voiceInput.toggle();submarineAudio.playClick()}} style={{width:36,height:36,borderRadius:'50%',border:'2px solid '+(va?'#00e676':'rgba(0,229,255,0.25)'),background:va?'rgba(0,230,118,0.12)':'rgba(0,4,16,0.8)',color:va?'#00e676':'#00e5ff',cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',fontSize:15,transition:'all 0.3s',boxShadow:va?'0 0 10px rgba(0,230,118,0.25)':'none'}}>🎙</button>
     <form onSubmit={submit} style={{display:'flex',gap:5}}>
@@ -146,7 +133,8 @@ function TransitionOverlay(){
 
 function KeyHints(){
   const periscopeMode=useGameStore(s=>s.periscopeMode)
-  if(periscopeMode) return null
+  // Only show key hints on desktop
+  if(periscopeMode||IS_TOUCH) return null
   return<div style={{position:'absolute',bottom:56,left:'50%',transform:'translateX(-50%)',display:'flex',gap:5,zIndex:100}}>
     {[{k:'1-5',l:'Lights'},{k:'T',l:'Thermal'},{k:'P',l:'Periscope'},{k:'V',l:'Int/Ext'},{k:'F',l:'Torpedo'},{k:'B',l:'BrahMos'},{k:'R',l:'Track'},{k:'N',l:'Next'}].map(({k,l})=>
       <div key={k} style={{padding:'2px 7px',background:'rgba(0,4,16,0.7)',border:'1px solid rgba(0,229,255,0.08)',borderRadius:3,fontSize:7,fontFamily:'var(--font-mono)',color:'rgba(0,229,255,0.3)',whiteSpace:'nowrap'}}>
@@ -162,16 +150,21 @@ export default function HUDOverlay(){
 
   return<div style={{position:'fixed',inset:0,zIndex:100,pointerEvents:'none'}}>
     <div style={{pointerEvents:'auto'}}>
-      <AIDialogue/>
-      <StatusBar/>
-      <WeaponsPanel/>
-      <QuickActions/>
-      <CommandInput/>
+      {/* Desktop panels — hidden on Quest */}
+      {!IS_TOUCH && <>
+        <AIDialogue/>
+        <StatusBar/>
+        <WeaponsPanel/>
+        <QuickActions/>
+        <CommandInput/>
+        <KeyHints/>
+      </>}
+      {/* Always shown */}
       <SceneTitle/>
       <TransitionOverlay/>
-      <KeyHints/>
-      {/* Periscope overlay — only in interior view */}
       {isInterior && <PeriscopeOverlay/>}
+      {/* Quest / mobile full HUD — always rendered, self-hides on desktop */}
+      <QuestHUD/>
     </div>
   </div>
 }
