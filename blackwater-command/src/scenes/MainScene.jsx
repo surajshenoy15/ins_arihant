@@ -80,7 +80,7 @@ function SubmarineDriver() {
 
     throttle.current = THREE.MathUtils.lerp(throttle.current, throttleTarget, delta * 1.8)
 
-    const maxForward = 18
+    const maxForward = 5
     const maxReverse = -5
     const desiredSpeed =
       throttle.current >= 0
@@ -125,7 +125,7 @@ function SubmarineDriver() {
     const forwardX = Math.cos(hdgRad)
     const forwardZ = Math.sin(hdgRad)
 
-    const SPEED_SCALE = 1.35
+    const SPEED_SCALE = 0.55
     const moveAmount = speed.current * SPEED_SCALE * delta
 
     sharedSubPosition.x += forwardX * moveAmount
