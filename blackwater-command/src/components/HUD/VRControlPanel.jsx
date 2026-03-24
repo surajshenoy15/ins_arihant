@@ -1,9 +1,9 @@
 /**
- * VRControlPanel — 3D in-world UI for Quest VR mode
- * Floats in front of the player inside the submarine.
- * Uses @react-three/xr controller input + 3D mesh buttons.
+ * VRControlPanel — Fixed 3D panel always visible in Quest VR
+ * Mounted to a fixed position inside the submarine cockpit.
+ * Uses XR pointer (point controller + trigger) to press buttons.
  */
-import React, { useRef, useState, useCallback, useEffect } from 'react'
+import React, { useRef, useState, useCallback } from 'react'
 import { useFrame } from '@react-three/fiber'
 import { Text } from '@react-three/drei'
 import { useXR } from '@react-three/xr'
@@ -12,200 +12,145 @@ import { useGameStore, LIGHT_MODES, VIEW_MODES } from '../../stores/gameStore'
 import { speakReactive, indraVoice } from '../../systems/AIAssistant'
 import { submarineAudio } from '../../systems/AudioManager'
 
-// ─── 3D Button ────────────────────────────────────────────────────────────────
-function VRButton({ position, label, sublabel, color = '#00e5ff', onPress, active = false, width = 0.18, height = 0.055 }) {
-  const meshRef = useRef()
-  const [hovered, setHovered] = useState(false)
-  const [pressed, setPressedState] = useState(false)
-  const pressedRef = useRef(false)
+// ─── Single 3D pressable button ───────────────────────────────────────────────
+function VRBtn({ pos, w = 0.22, h = 0.07, label, sub, color = '#00e5ff', active = false, onPress }) {
+  const ref  = useRef()
+  const [hot, setHot] = useState(false)
 
-  const handlePress = useCallback(() => {
-    setPressedState(true)
-    pressedRef.current = true
+  const press = useCallback((e) => {
+    e.stopPropagation()
     onPress?.()
-    setTimeout(() => { setPressedState(false); pressedRef.current = false }, 200)
+    // Brief scale pop
+    if (ref.current) {
+      ref.current.scale.set(0.9, 0.9, 0.9)
+      setTimeout(() => ref.current?.scale.set(1, 1, 1), 140)
+    }
   }, [onPress])
 
-  useFrame(() => {
-    if (!meshRef.current) return
-    const targetScale = pressed ? 0.88 : hovered ? 1.06 : 1
-    meshRef.current.scale.lerp(new THREE.Vector3(targetScale, targetScale, targetScale), 0.2)
-  })
-
-  const bgColor = pressed ? '#ffffff'
-    : hovered  ? color
-    : active   ? color + '44'
-    : '#020c18'
-
-  const borderColor = active || hovered ? color : '#1a3040'
+  const col = hot ? color : active ? color + '55' : '#020e1a'
+  const brd = hot || active ? color : '#1c3a4a'
 
   return (
-    <group position={position}>
-      {/* Button backing */}
-      <mesh ref={meshRef} castShadow={false}
-        onPointerEnter={() => setHovered(true)}
-        onPointerLeave={() => setHovered(false)}
-        onPointerDown={handlePress}
-      >
-        <boxGeometry args={[width, height, 0.008]} />
-        <meshStandardMaterial color={bgColor} emissive={bgColor} emissiveIntensity={active ? 0.4 : 0.15} roughness={0.4} metalness={0.6} />
-      </mesh>
-      {/* Border frame */}
+    <group position={pos}>
+      {/* border */}
       <mesh>
-        <boxGeometry args={[width + 0.006, height + 0.006, 0.004]} />
-        <meshStandardMaterial color={borderColor} emissive={borderColor} emissiveIntensity={0.6} roughness={0.3} metalness={0.8} />
+        <boxGeometry args={[w + 0.008, h + 0.008, 0.009]} />
+        <meshStandardMaterial color={brd} emissive={brd} emissiveIntensity={0.8} />
       </mesh>
-      {/* Label */}
-      <Text position={[0, sublabel ? 0.008 : 0, 0.007]} fontSize={0.018} color={hovered || active ? color : '#a0c8d8'} anchorX="center" anchorY="middle" fontWeight="bold">
+      {/* face */}
+      <mesh ref={ref}
+        onPointerEnter={() => setHot(true)}
+        onPointerLeave={() => setHot(false)}
+        onPointerDown={press}
+      >
+        <boxGeometry args={[w, h, 0.012]} />
+        <meshStandardMaterial color={col} emissive={active ? color : hot ? color : '#000'} emissiveIntensity={active ? 0.5 : hot ? 0.3 : 0} roughness={0.4} metalness={0.5} />
+      </mesh>
+      <Text position={[0, sub ? 0.012 : 0, 0.01]} fontSize={0.022} color={hot || active ? '#fff' : color} anchorX="center" anchorY="middle" fontWeight="bold" maxWidth={w * 0.9}>
         {label}
       </Text>
-      {sublabel && (
-        <Text position={[0, -0.01, 0.007]} fontSize={0.01} color={color + '88'} anchorX="center" anchorY="middle">
-          {sublabel}
+      {sub && (
+        <Text position={[0, -0.016, 0.01]} fontSize={0.013} color={color + 'aa'} anchorX="center" anchorY="middle">
+          {sub}
         </Text>
       )}
     </group>
   )
 }
 
-// Controller interaction is handled by @react-three/xr's built-in pointer system
-// via onPointerDown on mesh objects — no manual ray setup needed
-
-// ─── Throttle slider ──────────────────────────────────────────────────────────
-function ThrottleSlider({ position }) {
-  const speed = useGameStore(s => s.speed)
-  const pct   = Math.max(0, Math.min(1, (speed + 5) / 10))
-
+// ─── Section label ────────────────────────────────────────────────────────────
+function Lbl({ pos, text, color = 'rgba(0,229,255,0.45)' }) {
   return (
-    <group position={position}>
-      <Text position={[0, 0.05, 0.005]} fontSize={0.014} color="rgba(0,229,255,0.6)" anchorX="center">THROTTLE</Text>
-      {/* Track */}
-      <mesh position={[0, 0, 0]}>
-        <boxGeometry args={[0.16, 0.012, 0.006]} />
-        <meshStandardMaterial color="#0a1820" roughness={0.8} />
-      </mesh>
-      {/* Fill */}
-      <mesh position={[(-0.08 + pct * 0.16) / 2 - 0.08 + pct * 0.08, 0, 0.004]}>
-        <boxGeometry args={[pct * 0.16, 0.01, 0.004]} />
-        <meshStandardMaterial color={speed > 0 ? '#4cff8a' : '#ff6b6b'} emissive={speed > 0 ? '#4cff8a' : '#ff6b6b'} emissiveIntensity={0.5} />
-      </mesh>
-      <Text position={[0, -0.02, 0.005]} fontSize={0.014} color="#ffe066" anchorX="center">
-        {speed.toFixed(1)} kn
-      </Text>
-    </group>
+    <Text position={pos} fontSize={0.016} color={color} anchorX="left" anchorY="middle" letterSpacing={0.08}>
+      {text}
+    </Text>
   )
 }
 
-// ─── Depth gauge ──────────────────────────────────────────────────────────────
-function DepthGauge({ position }) {
-  const depth = useGameStore(s => s.depth)
-  const pct   = Math.min(1, Math.abs(depth) / 450)
-  const color = Math.abs(depth) > 300 ? '#ff6b6b' : Math.abs(depth) > 150 ? '#ffcc44' : '#00e5ff'
-
-  return (
-    <group position={position}>
-      <Text position={[0, 0.07, 0.005]} fontSize={0.014} color="rgba(0,229,255,0.6)" anchorX="center">DEPTH</Text>
-      {/* Vertical track */}
-      <mesh><boxGeometry args={[0.012, 0.12, 0.006]} /><meshStandardMaterial color="#0a1820" roughness={0.8} /></mesh>
-      {/* Fill from top */}
-      <mesh position={[0, 0.06 - pct * 0.06, 0.004]}>
-        <boxGeometry args={[0.01, pct * 0.12, 0.004]} />
-        <meshStandardMaterial color={color} emissive={color} emissiveIntensity={0.5} />
-      </mesh>
-      <Text position={[0, -0.075, 0.005]} fontSize={0.014} color={color} anchorX="center">
-        {Math.abs(depth).toFixed(0)}m
-      </Text>
-    </group>
-  )
-}
-
-// ─── Status display ───────────────────────────────────────────────────────────
-function VRStatusDisplay({ position }) {
+// ─── Live status readout ──────────────────────────────────────────────────────
+function VRStatus({ pos }) {
+  const textRef = useRef()
   const depth    = useGameStore(s => s.depth)
   const speed    = useGameStore(s => s.speed)
   const heading  = useGameStore(s => s.heading)
   const hull     = useGameStore(s => s.hullIntegrity)
-  const o2       = useGameStore(s => s.oxygenLevel)
-  const reactor  = useGameStore(s => s.reactorTemp)
+  const torp     = useGameStore(s => s.torpedoCount)
+  const brahmos  = useGameStore(s => s.brahmosMissiles)
   const contacts = useGameStore(s => s.contacts)
   const hostile  = contacts.filter(c => c.hostile).length
-  const torpedoes = useGameStore(s => s.torpedoCount)
-  const brahmos  = useGameStore(s => s.brahmosMissiles)
-
-  const rows = [
-    [`HDG  ${String(Math.round(heading)).padStart(3,'0')}°`, `SPD  ${speed.toFixed(1)}kn`],
-    [`DEP  ${Math.abs(depth).toFixed(0)}m`,                  `HULL ${hull.toFixed(0)}%`],
-    [`O₂   ${o2.toFixed(0)}%`,                              `RCTR ${reactor.toFixed(0)}K`],
-    [`TORP ${torpedoes}/6`,                                  `BRHM ${brahmos}/4`],
-    [hostile > 0 ? `⚠ ${hostile} HOSTILE` : `CONTACTS: ${contacts.length}`, ''],
-  ]
 
   return (
-    <group position={position}>
-      {/* Panel background */}
+    <group position={pos}>
+      {/* bg panel */}
       <mesh>
-        <boxGeometry args={[0.38, 0.18, 0.004]} />
-        <meshStandardMaterial color="#020c18" roughness={0.9} metalness={0.3} />
+        <boxGeometry args={[0.96, 0.095, 0.006]} />
+        <meshStandardMaterial color="#020e1a" roughness={0.9} metalness={0.2} />
       </mesh>
       <mesh>
-        <boxGeometry args={[0.386, 0.186, 0.002]} />
-        <meshStandardMaterial color="#1a3a50" emissive="#1a3a50" emissiveIntensity={0.3} roughness={0.5} />
+        <boxGeometry args={[0.968, 0.103, 0.003]} />
+        <meshStandardMaterial color="#0a3a55" emissive="#0a3a55" emissiveIntensity={0.4} />
       </mesh>
 
-      {/* Title */}
-      <Text position={[0, 0.075, 0.004]} fontSize={0.014} color="#00e5ff" anchorX="center" letterSpacing={2}>
-        INS ARIHANT • S73
+      {/* Left col */}
+      <Text position={[-0.42, 0.022, 0.005]} fontSize={0.018} color="#ffe066" anchorX="left">
+        {`HDG ${String(Math.round(heading)).padStart(3,'0')}°  SPD ${speed.toFixed(1)}kn`}
       </Text>
-      <mesh position={[0, 0.062, 0.004]}>
-        <boxGeometry args={[0.34, 0.001, 0.001]} />
-        <meshStandardMaterial color="#00e5ff" emissive="#00e5ff" emissiveIntensity={0.6} />
-      </mesh>
+      <Text position={[-0.42, -0.018, 0.005]} fontSize={0.018} color={Math.abs(depth) > 300 ? '#ff6b6b' : '#00e5ff'} anchorX="left">
+        {`DEP ${Math.abs(depth).toFixed(0)}m  HULL ${hull.toFixed(0)}%`}
+      </Text>
 
-      {rows.map((row, ri) => (
-        <group key={ri} position={[0, 0.042 - ri * 0.025, 0.004]}>
-          <Text position={[-0.09, 0, 0]} fontSize={0.013} color={row[0].includes('⚠') ? '#ff6b6b' : '#a0c8d8'} anchorX="left">{row[0]}</Text>
-          {row[1] && <Text position={[0.04, 0, 0]} fontSize={0.013} color="#a0c8d8" anchorX="left">{row[1]}</Text>}
-        </group>
-      ))}
+      {/* Right col */}
+      <Text position={[0.05, 0.022, 0.005]} fontSize={0.018} color="#4cff8a" anchorX="left">
+        {`TORP ${torp}/6  BRH ${brahmos}/4`}
+      </Text>
+      <Text position={[0.05, -0.018, 0.005]} fontSize={0.018} color={hostile > 0 ? '#ff6b6b' : '#78909c'} anchorX="left">
+        {hostile > 0 ? `⚠ ${hostile} HOSTILE CONTACT${hostile > 1 ? 'S' : ''}` : `CONTACTS: ${contacts.length} — ALL CLEAR`}
+      </Text>
     </group>
   )
 }
 
-// ─── Main VR Control Panel ────────────────────────────────────────────────────
+// ─── Main panel ───────────────────────────────────────────────────────────────
 export default function VRControlPanel() {
   const { isPresenting } = useXR()
-  const groupRef  = useRef()
-  const vm        = useGameStore(s => s.viewMode)
-  const isInterior = vm === VIEW_MODES.INTERIOR || vm === 'interior'
+
+  const vm         = useGameStore(s => s.viewMode)
   const lightMode  = useGameStore(s => s.lightMode)
   const thermalOn  = useGameStore(s => s.thermalEnabled)
-  const torpedoes  = useGameStore(s => s.torpedoCount)
-  const brahmos    = useGameStore(s => s.brahmosMissiles)
-  const contacts   = useGameStore(s => s.contacts)
+  const periscopeOn = useGameStore(s => s.periscopeMode)
+  const isInterior = vm === VIEW_MODES.INTERIOR || vm === 'interior'
 
-  // Follow camera smoothly — panel floats in front-left of player
-  useFrame(({ camera }) => {
-    if (!groupRef.current || !isPresenting) return
-
-    const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion)
-    const right   = new THREE.Vector3(1, 0,  0).applyQuaternion(camera.quaternion)
-
-    const target = camera.position.clone()
-      .addScaledVector(forward, 0.65)   // 65cm in front
-      .addScaledVector(right,  -0.28)   // 28cm to the left
-      .add(new THREE.Vector3(0, -0.12, 0)) // 12cm below eye level
-
-    groupRef.current.position.lerp(target, 0.04)
-
-    // Face the camera
-    groupRef.current.quaternion.slerp(camera.quaternion, 0.04)
-  })
-
+  // ── Actions ────────────────────────────────────────────────────────────────
   const switchView = useCallback(() => {
     const nv = isInterior ? VIEW_MODES.EXTERIOR : VIEW_MODES.INTERIOR
     useGameStore.getState().setViewMode(nv)
     speakReactive(nv === VIEW_MODES.EXTERIOR ? 'exteriorView' : 'interiorView')
   }, [isInterior])
+
+  const dive = useCallback(() => {
+    useGameStore.getState().initiateDive(-100)
+    indraVoice.speak('Diving. Target depth one hundred metres.', 'info')
+  }, [])
+
+  const surface = useCallback(() => {
+    useGameStore.getState().surfaceSubmarine()
+    indraVoice.speak('Surfacing. Blow all ballast.', 'info')
+  }, [])
+
+  const pingSonar = useCallback(() => {
+    useGameStore.getState().triggerActiveSonar()
+    speakReactive('sonarPing')
+  }, [])
+
+  const toggleThermal = useCallback(() => {
+    useGameStore.getState().toggleThermal()
+    speakReactive(useGameStore.getState().thermalEnabled ? 'thermalEnabled' : 'thermalDisabled')
+  }, [])
+
+  const togglePeriscope = useCallback(() => {
+    useGameStore.getState().togglePeriscope?.()
+    speakReactive('periscopeUp')
+  }, [])
 
   const fireTorpedo = useCallback(() => {
     const s = useGameStore.getState()
@@ -215,7 +160,7 @@ export default function VRControlPanel() {
       submarineAudio?.playTorpedoLaunch?.()
       speakReactive('torpedoFired')
     } else {
-      indraVoice.speak(s.torpedoCount <= 0 ? 'Tubes empty.' : 'No target.', 'warning')
+      indraVoice.speak(s.torpedoCount <= 0 ? 'Tubes empty.' : 'No target. Use TRACK first.', 'warning')
     }
   }, [])
 
@@ -244,73 +189,100 @@ export default function VRControlPanel() {
     else indraVoice.speak('Decoys exhausted.', 'warning')
   }, [])
 
-  const pingSonar = useCallback(() => {
-    useGameStore.getState().triggerActiveSonar()
-    speakReactive('sonarPing')
-  }, [])
-
-  const toggleThermal = useCallback(() => {
-    useGameStore.getState().toggleThermal()
-    speakReactive(useGameStore.getState().thermalEnabled ? 'thermalEnabled' : 'thermalDisabled')
-  }, [])
-
-  const togglePeriscope = useCallback(() => {
-    useGameStore.getState().togglePeriscope?.()
-  }, [])
-
   const setLight = useCallback((mode) => {
     useGameStore.getState().setLightMode(mode)
     speakReactive('lightChange', mode)
   }, [])
 
-  const dive = useCallback(() => {
-    const s = useGameStore.getState()
-    s.initiateDive(-100)
-    indraVoice.speak('Diving. Target depth one hundred metres.', 'info')
-  }, [])
-
-  const surface = useCallback(() => {
-    useGameStore.getState().surfaceSubmarine()
-    indraVoice.speak('Surfacing. Blow all ballast.', 'info')
+  const nextScene = useCallback(() => {
+    useGameStore.getState().advanceScene()
   }, [])
 
   if (!isPresenting) return null
 
+  // ── Layout constants ────────────────────────────────────────────────────────
+  // Panel is fixed inside the sub, on the console desk directly in front of player
+  // Position: slightly below eye level, close enough to read, far enough to see all
+  const PANEL_POS  = [0, 1.0, -1.1]   // right in front of seated player in cockpit
+  const PANEL_ROT  = [-0.25, 0, 0]    // tilted up toward player like a real console
+
+  // Button layout: 4 columns, rows spaced 0.1 apart
+  const C = [-0.36, -0.12, 0.12, 0.36]  // column x positions
+  const R = [0.15, 0.035, -0.085, -0.205, -0.325] // row y positions
+
   return (
-    <group ref={groupRef}>
+    <group position={PANEL_POS} rotation={PANEL_ROT}>
 
-      {/* ── Status panel ── */}
-      <VRStatusDisplay position={[0, 0.14, 0]} />
+      {/* ── Outer panel frame ── */}
+      <mesh position={[0, 0, -0.008]}>
+        <boxGeometry args={[1.02, 0.56, 0.014]} />
+        <meshStandardMaterial color="#0a1825" roughness={0.8} metalness={0.5} />
+      </mesh>
+      <mesh position={[0, 0, -0.005]}>
+        <boxGeometry args={[1.028, 0.568, 0.008]} />
+        <meshStandardMaterial color="#0d3550" emissive="#0d3550" emissiveIntensity={0.3} />
+      </mesh>
 
-      {/* ── Row 1: Navigation ── */}
-      <Text position={[-0.09, 0.025, 0.003]} fontSize={0.011} color="rgba(0,229,255,0.4)" anchorX="left" letterSpacing={1}>NAVIGATION</Text>
-      <VRButton position={[-0.16, 0.008, 0]} label="DIVE" sublabel="100m" color="#ffcc44" onPress={dive} width={0.095} />
-      <VRButton position={[-0.055, 0.008, 0]} label="SURFACE" color="#4cff8a" onPress={surface} width={0.095} />
-      <VRButton position={[0.055, 0.008, 0]} label="SONAR" color="#00e5ff" onPress={pingSonar} width={0.095} />
-      <VRButton position={[0.16, 0.008, 0]} label={isInterior ? 'EXTERIOR' : 'INTERIOR'} color="#64ffda" onPress={switchView} width={0.095} />
-
-      {/* ── Row 2: Weapons ── */}
-      <Text position={[-0.09, -0.032, 0.003]} fontSize={0.011} color="rgba(255,107,107,0.5)" anchorX="left" letterSpacing={1}>WEAPONS</Text>
-      <VRButton position={[-0.16, -0.05, 0]} label="TORPEDO" sublabel={`${torpedoes}/6`} color="#ff6b6b" onPress={fireTorpedo} width={0.095} />
-      <VRButton position={[-0.055, -0.05, 0]} label="BRAHMOS" sublabel={`${brahmos}/4`} color="#ffcc44" onPress={fireBrahmos} width={0.095} />
-      <VRButton position={[0.055, -0.05, 0]} label="TRACK" color="#ff9f43" onPress={trackContact} width={0.095} />
-      <VRButton position={[0.16, -0.05, 0]} label="DECOY" color="#a29bfe" onPress={deployDecoy} width={0.095} />
-
-      {/* ── Row 3: Systems ── */}
-      <Text position={[-0.09, -0.092, 0.003]} fontSize={0.011} color="rgba(0,229,255,0.4)" anchorX="left" letterSpacing={1}>SYSTEMS</Text>
-      <VRButton position={[-0.16, -0.11, 0]} label="NORMAL" color="#00e5ff" active={lightMode === LIGHT_MODES.NORMAL}    onPress={() => setLight(LIGHT_MODES.NORMAL)}    width={0.095} />
-      <VRButton position={[-0.055, -0.11, 0]} label="STEALTH" color="#a29bfe" active={lightMode === LIGHT_MODES.STEALTH}  onPress={() => setLight(LIGHT_MODES.STEALTH)}   width={0.095} />
-      <VRButton position={[0.055, -0.11, 0]} label="COMBAT"  color="#ff6b6b" active={lightMode === LIGHT_MODES.COMBAT}   onPress={() => setLight(LIGHT_MODES.COMBAT)}    width={0.095} />
-      <VRButton position={[0.16, -0.11, 0]} label="THERMAL" color="#ff9f43" active={thermalOn}                           onPress={toggleThermal}                         width={0.095} />
-
-      {/* ── Gauges ── */}
-      <ThrottleSlider position={[-0.21, 0.008, 0]} />
-      <DepthGauge     position={[-0.21, -0.07, 0]} />
-
-      {/* ── Panel label ── */}
-      <Text position={[0, -0.155, 0.003]} fontSize={0.01} color="rgba(0,229,255,0.25)" anchorX="center" letterSpacing={2}>
-        POINT CONTROLLER AT BUTTONS • PULL TRIGGER TO PRESS
+      {/* ── Title bar ── */}
+      <mesh position={[0, 0.245, 0.001]}>
+        <boxGeometry args={[1.02, 0.06, 0.005]} />
+        <meshStandardMaterial color="#041525" roughness={0.9} />
+      </mesh>
+      <Text position={[-0.44, 0.245, 0.006]} fontSize={0.022} color="#00e5ff" anchorX="left" anchorY="middle" letterSpacing={0.1}>
+        INS ARIHANT  S73  —  COMBAT CONTROL
       </Text>
+      <Text position={[0.44, 0.245, 0.006]} fontSize={0.018} color="#ffe066" anchorX="right" anchorY="middle">
+        {isInterior ? 'INTERIOR' : 'EXTERIOR'}
+      </Text>
+
+      {/* ── Status row ── */}
+      <VRStatus pos={[0, 0.16, 0.002]} />
+
+      {/* ── Section: NAVIGATION ── */}
+      <Lbl pos={[-0.48, R[1] + 0.05, 0.004]} text="◈ NAVIGATION" color="rgba(0,229,255,0.5)" />
+      <VRBtn pos={[C[0], R[1], 0.002]} label="DIVE" sub="100m" color="#ffcc44" onPress={dive} />
+      <VRBtn pos={[C[1], R[1], 0.002]} label="SURFACE" color="#4cff8a" onPress={surface} />
+      <VRBtn pos={[C[2], R[1], 0.002]} label="SONAR" sub="PING" color="#00e5ff" onPress={pingSonar} />
+      <VRBtn pos={[C[3], R[1], 0.002]} label={isInterior ? '→ EXTERIOR' : '→ INTERIOR'} color="#64ffda" active={false} onPress={switchView} />
+
+      {/* ── Section: SENSORS ── */}
+      <Lbl pos={[-0.48, R[2] + 0.05, 0.004]} text="◈ SENSORS" color="rgba(0,229,255,0.5)" />
+      <VRBtn pos={[C[0], R[2], 0.002]} label="THERMAL" color="#ff9f43" active={thermalOn} onPress={toggleThermal} />
+      <VRBtn pos={[C[1], R[2], 0.002]} label="PERISCOPE" color="#a29bfe" active={periscopeOn} onPress={togglePeriscope} />
+      <VRBtn pos={[C[2], R[2], 0.002]} label="TRACK" sub="HOSTILE" color="#ffd36a" onPress={trackContact} />
+      <VRBtn pos={[C[3], R[2], 0.002]} label="DECOY" color="#a29bfe" onPress={deployDecoy} />
+
+      {/* ── Section: WEAPONS ── */}
+      <Lbl pos={[-0.48, R[3] + 0.05, 0.004]} text="◈ WEAPONS" color="rgba(255,107,107,0.6)" />
+      <VRBtn pos={[C[0], R[3], 0.002]} label="TORPEDO" color="#ff6b6b" onPress={fireTorpedo} />
+      <VRBtn pos={[C[1], R[3], 0.002]} label="BRAHMOS" color="#ffcc44" onPress={fireBrahmos} />
+
+      {/* ── Section: LIGHTING ── */}
+      <Lbl pos={[0.02, R[3] + 0.05, 0.004]} text="◈ LIGHTING" color="rgba(0,229,255,0.5)" />
+      <VRBtn pos={[C[2], R[3], 0.002]} label="NORMAL" color="#00e5ff" active={lightMode === LIGHT_MODES.NORMAL} onPress={() => setLight(LIGHT_MODES.NORMAL)} />
+      <VRBtn pos={[C[3], R[3], 0.002]} label="STEALTH" color="#a29bfe" active={lightMode === LIGHT_MODES.STEALTH} onPress={() => setLight(LIGHT_MODES.STEALTH)} />
+
+      {/* ── Bottom row ── */}
+      <VRBtn pos={[C[0], R[4], 0.002]} label="COMBAT" sub="STATIONS" color="#ff6b6b" active={lightMode === LIGHT_MODES.COMBAT} onPress={() => setLight(LIGHT_MODES.COMBAT)} />
+      <VRBtn pos={[C[1], R[4], 0.002]} label="EMERGENCY" color="#ff4444" active={lightMode === LIGHT_MODES.EMERGENCY} onPress={() => setLight(LIGHT_MODES.EMERGENCY)} />
+      <VRBtn pos={[C[2], R[4], 0.002]} label="LIGHTS OFF" color="#455a64" active={lightMode === LIGHT_MODES.OFF} onPress={() => setLight(LIGHT_MODES.OFF)} />
+      <VRBtn pos={[C[3], R[4], 0.002]} label="▶ NEXT SCENE" color="#ffd600" onPress={nextScene} />
+
+      {/* ── D-pad for movement ── */}
+      {/* Up/Down throttle */}
+      <Lbl pos={[-0.48, R[4] + 0.04, 0.004]} text="HELM" color="rgba(0,229,255,0.4)" />
+
+      {/* ── Footer hint ── */}
+      <mesh position={[0, -0.255, 0.001]}>
+        <boxGeometry args={[1.02, 0.03, 0.003]} />
+        <meshStandardMaterial color="#020c16" roughness={0.9} />
+      </mesh>
+      <Text position={[0, -0.255, 0.005]} fontSize={0.013} color="rgba(0,229,255,0.3)" anchorX="center" anchorY="middle" letterSpacing={0.05}>
+        POINT CONTROLLER AT BUTTON  •  PULL TRIGGER TO ACTIVATE
+      </Text>
+
+      {/* ── Subtle glow light ── */}
+      <pointLight position={[0, 0, 0.08]} color="#00e5ff" intensity={0.15} distance={1.2} />
     </group>
   )
 }

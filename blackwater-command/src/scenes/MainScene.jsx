@@ -6,6 +6,7 @@ import * as THREE from 'three'
 
 import UnderwaterEnvironment from '../components/Environment/UnderwaterEnvironment'
 import VRControlPanel from '../components/HUD/VRControlPanel'
+import VRDriver from '../components/HUD/VRDriver'
 import SubmarineInterior from '../components/Interior/SubmarineInterior'
 import SubmarineExterior from '../components/Interior/SubmarineExterior'
 import PlayerController from '../components/Interior/PlayerController'
@@ -250,7 +251,9 @@ function XRScene() {
       <ambientLight intensity={1.2} color="#b4d6ee" />
       <directionalLight position={[20,30,10]} intensity={1.4} color="#fff5d8" castShadow={false} />
 
-      {/* Drive controls work in VR too */}
+      {/* Thumbstick driving for Quest controllers */}
+      <VRDriver />
+      {/* Keyboard driving still works via SubmarineDriver */}
       <SubmarineDriver />
 
       {isInterior ? (
