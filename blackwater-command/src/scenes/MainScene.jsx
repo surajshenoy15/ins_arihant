@@ -14,10 +14,10 @@ import CombatScene, { EnemySpawner } from '../components/Environment/CombatScene
 import { useGameStore, LIGHT_MODES, VIEW_MODES } from '../stores/gameStore'
 
 const xrStore = createXRStore({
-  hand: true,
+  hand: false,
   controller: true,
   sessionInit: {
-    optionalFeatures: ['local-floor', 'hand-tracking'],
+    optionalFeatures: ['local-floor'],
   },
 })
 
@@ -379,7 +379,43 @@ function ExteriorScene() {
   )
 }
 
-function VRButton() {
+function XRScene() {
+  const isInterior = useGameStore(s => s.viewMode === VIEW_MODES.INTERIOR || s.viewMode === 'interior')
+
+  return (
+    <>
+      <color attach="background" args={['#06131f']} />
+      <ambientLight intensity={1.0} color="#b4d6ee" />
+      <directionalLight position={[20, 30, 10]} intensity={1.4} color="#fff5d8" />
+
+      {isInterior ? (
+        <>
+          <SubHullSway>
+            <SubmarineInterior />
+          </SubHullSway>
+
+          <group position={[0, -18, -42]} scale={[1.8, 1.8, 1.8]}>
+            <OceanRig>
+              <UnderwaterEnvironment />
+            </OceanRig>
+          </group>
+        </>
+      ) : (
+        <>
+          <SubMovingRig>
+            <SubmarineExterior />
+          </SubMovingRig>
+
+          <OceanRig>
+            <UnderwaterEnvironment />
+          </OceanRig>
+        </>
+      )}
+    </>
+  )
+}
+
+function VRButton({ setXRError }) {
   const [supported, setSupported] = useState(false)
   const [checking, setChecking] = useState(true)
   const [entering, setEntering] = useState(false)
@@ -407,24 +443,27 @@ function VRButton() {
         if (mounted) {
           setSupported(false)
           setChecking(false)
+          setXRError(`XR support check failed: ${err?.message || String(err)}`)
         }
       }
     }
 
     checkXR()
-
     return () => {
       mounted = false
     }
-  }, [])
+  }, [setXRError])
 
   const handleEnterVR = async () => {
     try {
+      setXRError('')
       setEntering(true)
       await xrStore.enterVR()
     } catch (err) {
       console.error('Failed to enter VR:', err)
-      alert(`Failed to enter VR: ${err?.message || err}`)
+      const msg = `Failed to enter VR: ${err?.message || String(err)}`
+      setXRError(msg)
+      alert(msg)
     } finally {
       setEntering(false)
     }
@@ -434,20 +473,7 @@ function VRButton() {
     return (
       <button
         disabled
-        style={{
-          position: 'fixed',
-          bottom: 28,
-          right: 28,
-          zIndex: 500,
-          padding: '10px 22px',
-          background: 'rgba(0,4,16,0.92)',
-          border: '1px solid rgba(0,229,255,0.4)',
-          borderRadius: 6,
-          color: '#00e5ff',
-          fontFamily: '"Share Tech Mono", monospace',
-          fontSize: 11,
-          letterSpacing: 2,
-        }}
+        style={vrButtonStyle}
       >
         CHECKING XR...
       </button>
@@ -460,22 +486,7 @@ function VRButton() {
     <button
       onClick={handleEnterVR}
       disabled={entering}
-      style={{
-        position: 'fixed',
-        bottom: 28,
-        right: 28,
-        zIndex: 500,
-        padding: '10px 22px',
-        background: 'rgba(0,4,16,0.92)',
-        border: '1px solid rgba(0,229,255,0.4)',
-        borderRadius: 6,
-        color: '#00e5ff',
-        fontFamily: '"Share Tech Mono", monospace',
-        fontSize: 11,
-        letterSpacing: 2,
-        cursor: 'pointer',
-        backdropFilter: 'blur(8px)',
-      }}
+      style={vrButtonStyle}
     >
       {entering ? 'ENTERING VR...' : '🥽 ENTER VR'}
     </button>
@@ -531,7 +542,43 @@ function ScenePostFX({
   )
 }
 
+const vrButtonStyle = {
+  position: 'fixed',
+  bottom: 28,
+  right: 28,
+  zIndex: 500,
+  padding: '10px 22px',
+  background: 'rgba(0,4,16,0.92)',
+  border: '1px solid rgba(0,229,255,0.4)',
+  borderRadius: 6,
+  color: '#00e5ff',
+  fontFamily: '"Share Tech Mono", monospace',
+  fontSize: 11,
+  letterSpacing: 2,
+  cursor: 'pointer',
+  backdropFilter: 'blur(8px)',
+}
+
+const xrErrorStyle = {
+  position: 'fixed',
+  left: 16,
+  bottom: 16,
+  maxWidth: 420,
+  zIndex: 600,
+  padding: '10px 12px',
+  background: 'rgba(40,0,0,0.88)',
+  color: '#ffd5d5',
+  border: '1px solid rgba(255,80,80,0.5)',
+  borderRadius: 8,
+  fontFamily: 'monospace',
+  fontSize: 12,
+  lineHeight: 1.4,
+  whiteSpace: 'pre-wrap',
+}
+
 export default function MainScene() {
+  const [xrError, setXRError] = useState('')
+
   const lm = useGameStore(s => s.lightMode)
   const alarm = useGameStore(s => s.alarmActive)
   const vm = useGameStore(s => s.viewMode)
@@ -584,7 +631,8 @@ export default function MainScene() {
 
   return (
     <>
-      <VRButton />
+      <VRButton setXRError={setXRError} />
+      {xrError ? <div style={xrErrorStyle}>{xrError}</div> : null}
 
       <Canvas
         gl={{
@@ -596,9 +644,9 @@ export default function MainScene() {
           outputColorSpace: THREE.SRGBColorSpace,
           xrCompatible: true,
         }}
-        dpr={[1, 1.5]}
+        dpr={[1, 1.25]}
         camera={{ fov: cameraFov, near: 0.05, far: 600, position: cameraPos }}
-        shadows
+        shadows={false}
         style={{ position: 'fixed', inset: 0, background: '#000810' }}
         onCreated={({ gl }) => {
           gl.xr.enabled = true
@@ -607,31 +655,60 @@ export default function MainScene() {
         <XR store={xrStore}>
           <Suspense
             fallback={
-              <mesh>
+              <mesh position={[0, 1.5, -2]}>
                 <boxGeometry args={[0.5, 0.5, 0.5]} />
                 <meshStandardMaterial color="#00e5ff" wireframe />
               </mesh>
             }
           >
             <GameTick />
-            <EnemySpawner />
             <SubmarineDriver />
 
-            {isInterior && !periscopeMode && <InteriorScene />}
-            {isInterior && periscopeMode && <PeriscopeScene />}
-            {!isInterior && <ExteriorScene />}
-
-            <ScenePostFX
+            <XRModeSwitch
+              isInterior={isInterior}
+              periscopeMode={periscopeMode}
               bloomIntensity={bloomIntensity}
               vignetteDarkness={vignetteDarkness}
-              periscopeMode={periscopeMode}
-              isInterior={isInterior}
               detonation={detonation}
               alarm={alarm}
             />
           </Suspense>
         </XR>
       </Canvas>
+    </>
+  )
+}
+
+function XRModeSwitch({
+  isInterior,
+  periscopeMode,
+  bloomIntensity,
+  vignetteDarkness,
+  detonation,
+  alarm,
+}) {
+  const { isPresenting } = useXR()
+
+  if (isPresenting) {
+    return <XRScene />
+  }
+
+  return (
+    <>
+      <EnemySpawner />
+
+      {isInterior && !periscopeMode && <InteriorScene />}
+      {isInterior && periscopeMode && <PeriscopeScene />}
+      {!isInterior && <ExteriorScene />}
+
+      <ScenePostFX
+        bloomIntensity={bloomIntensity}
+        vignetteDarkness={vignetteDarkness}
+        periscopeMode={periscopeMode}
+        isInterior={isInterior}
+        detonation={detonation}
+        alarm={alarm}
+      />
     </>
   )
 }
