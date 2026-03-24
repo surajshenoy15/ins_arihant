@@ -776,95 +776,134 @@ function ForwardViewport({ position = [0, 1.02, -2.66], width = 2.95, height = 2
 
   const glassRef = useRef()
   const sheenRef = useRef()
+  const tintRef  = useRef()
 
   useFrame(({ clock }) => {
     const t = clock.elapsedTime
-    const depthGlow = THREE.MathUtils.clamp(Math.abs(depth) / 120, 0.18, 0.7)
-    const speedGlow = THREE.MathUtils.clamp((speed ?? 0) / 12, 0, 0.35)
-    const pulse = 0.92 + Math.sin(t * 0.8) * 0.04
+    const depthGlow   = THREE.MathUtils.clamp(Math.abs(depth) / 120, 0.18, 0.7)
+    const speedGlow   = THREE.MathUtils.clamp((speed ?? 0) / 12, 0, 0.35)
+    const pulse       = 0.92 + Math.sin(t * 0.8) * 0.04
+    const depthTint   = THREE.MathUtils.clamp(Math.abs(depth) / 400, 0, 0.55)
 
     if (glassRef.current) {
-      glassRef.current.emissiveIntensity = (0.06 + depthGlow * 0.12 + speedGlow * 0.08) * pulse
-      glassRef.current.opacity = 0.16
+      // Tint gets deeper/greener as depth increases
+      glassRef.current.color.setRGB(
+        0.55 - depthTint * 0.3,
+        0.88 - depthTint * 0.1,
+        1.0
+      )
+      glassRef.current.emissiveIntensity =
+        (0.03 + depthGlow * 0.07 + speedGlow * 0.04) * pulse
     }
 
     if (sheenRef.current) {
-      sheenRef.current.opacity = 0.1 + Math.sin(t * 0.6 + heading * 0.01) * 0.03
+      sheenRef.current.opacity =
+        0.06 + Math.sin(t * 0.6 + heading * 0.01) * 0.02
+    }
+
+    if (tintRef.current) {
+      // Subtle water-tint overlay that deepens with depth
+      tintRef.current.opacity = depthTint * 0.18
     }
   })
 
   return (
     <group position={position}>
-      {/* outer frame */}
+      {/* ── Outer armored frame ── */}
       <mesh castShadow receiveShadow>
         <boxGeometry args={[width + 0.24, height + 0.22, 0.12]} />
         <meshStandardMaterial color="#1c242d" roughness={0.5} metalness={0.88} />
       </mesh>
 
-      {/* inset dark gasket */}
-      <mesh position={[0, 0, 0.028]} castShadow receiveShadow>
-        <boxGeometry args={[width + 0.04, height + 0.04, 0.03]} />
+      {/* ── Rubber gasket inset (thin, not blocking view) ── */}
+      <mesh position={[0, 0, 0.025]}>
+        <boxGeometry args={[width + 0.04, height + 0.04, 0.018]} />
         <meshStandardMaterial color="#070b10" roughness={0.95} metalness={0.18} />
       </mesh>
 
-      {/* main transparent glass */}
-      <mesh position={[0, 0, 0.05]}>
+      {/* ── Cutout mask so nothing behind the glass plane blocks it ──
+           We achieve see-through by simply NOT placing any opaque plane
+           in front of the scene. The frame box has a hole cut visually
+           by the gasket sitting inside it.  ── */}
+
+      {/* ── Main transparent glass — pure physical transmission ── */}
+      <mesh position={[0, 0, 0.048]}>
         <planeGeometry args={[width, height]} />
         <meshPhysicalMaterial
           ref={glassRef}
-          color="#bfe9ff"
-          roughness={0.03}
+          color="#8fd8ff"
+          roughness={0.0}
           metalness={0.0}
-          transmission={0.96}
-          thickness={0.08}
+          transmission={0.97}        // near-fully transparent
+          thickness={0.12}
           transparent
-          opacity={0.16}
-          ior={1.12}
-          reflectivity={0.22}
-          envMapIntensity={0.45}
+          opacity={1}                // let transmission handle it
+          ior={1.33}                 // water-glass IOR
+          reflectivity={0.18}
+          envMapIntensity={0.6}
           clearcoat={1}
-          clearcoatRoughness={0.04}
-          emissive="#3dbdff"
-          emissiveIntensity={0.08}
+          clearcoatRoughness={0.02}
+          emissive="#1a8fa0"
+          emissiveIntensity={0.03}
+          depthWrite={false}
+          side={THREE.FrontSide}
         />
       </mesh>
 
-      {/* subtle reflection streak */}
-      <mesh position={[0, 0.08, 0.056]}>
-        <planeGeometry args={[width * 0.9, height * 0.22]} />
+      {/* ── Depth-tinted water overlay (additive, deepens with depth) ── */}
+      <mesh position={[0, 0, 0.052]}>
+        <planeGeometry args={[width, height]} />
+        <meshBasicMaterial
+          ref={tintRef}
+          color="#003355"
+          transparent
+          opacity={0}
+          blending={THREE.AdditiveBlending}
+          depthWrite={false}
+        />
+      </mesh>
+
+      {/* ── Subtle glare / reflection streak ── */}
+      <mesh position={[0.18, height * 0.28, 0.056]}>
+        <planeGeometry args={[width * 0.55, height * 0.18]} />
         <meshBasicMaterial
           ref={sheenRef}
-          color="#dff6ff"
+          color="#e8f8ff"
           transparent
-          opacity={0.1}
+          opacity={0.06}
           blending={THREE.AdditiveBlending}
+          depthWrite={false}
         />
       </mesh>
 
-      {/* horizontal brace top */}
-      <mesh position={[0, height / 2 - 0.14, 0.062]} castShadow receiveShadow>
-        <boxGeometry args={[width - 0.08, 0.04, 0.025]} />
+      {/* ── Frame reinforcement braces ── */}
+      {/* top brace */}
+      <mesh position={[0, height / 2 - 0.14, 0.065]} castShadow receiveShadow>
+        <boxGeometry args={[width - 0.08, 0.045, 0.028]} />
         <meshStandardMaterial color="#2a323c" roughness={0.55} metalness={0.82} />
       </mesh>
-
-      {/* horizontal brace bottom */}
-      <mesh position={[0, -height / 2 + 0.14, 0.062]} castShadow receiveShadow>
-        <boxGeometry args={[width - 0.08, 0.04, 0.025]} />
+      {/* bottom brace */}
+      <mesh position={[0, -height / 2 + 0.14, 0.065]} castShadow receiveShadow>
+        <boxGeometry args={[width - 0.08, 0.045, 0.028]} />
         <meshStandardMaterial color="#2a323c" roughness={0.55} metalness={0.82} />
       </mesh>
-
-      {/* center divider */}
-      <mesh position={[0, 0, 0.062]} castShadow receiveShadow>
-        <boxGeometry args={[0.045, height - 0.1, 0.025]} />
+      {/* center vertical divider */}
+      <mesh position={[0, 0, 0.065]} castShadow receiveShadow>
+        <boxGeometry args={[0.045, height - 0.1, 0.028]} />
         <meshStandardMaterial color="#2a323c" roughness={0.55} metalness={0.82} />
       </mesh>
+      {/* horizontal mid-brace */}
+      <mesh position={[0, height * 0.08, 0.065]} castShadow receiveShadow>
+        <boxGeometry args={[width - 0.08, 0.028, 0.022]} />
+        <meshStandardMaterial color="#252d36" roughness={0.6} metalness={0.78} />
+      </mesh>
 
-      {/* bolts */}
+      {/* ── Corner bolts ── */}
       {[
-        [-width / 2 - 0.06, height / 2 - 0.08, 0.065],
-        [ width / 2 + 0.06, height / 2 - 0.08, 0.065],
-        [-width / 2 - 0.06, -height / 2 + 0.08, 0.065],
-        [ width / 2 + 0.06, -height / 2 + 0.08, 0.065],
+        [-width / 2 - 0.06,  height / 2 - 0.08, 0.068],
+        [ width / 2 + 0.06,  height / 2 - 0.08, 0.068],
+        [-width / 2 - 0.06, -height / 2 + 0.08, 0.068],
+        [ width / 2 + 0.06, -height / 2 + 0.08, 0.068],
       ].map((p, i) => (
         <mesh key={i} position={p} castShadow receiveShadow>
           <cylinderGeometry args={[0.018, 0.018, 0.02, 10]} />
@@ -872,8 +911,22 @@ function ForwardViewport({ position = [0, 1.02, -2.66], width = 2.95, height = 2
         </mesh>
       ))}
 
-      {/* soft blue forward visibility glow */}
-      <pointLight position={[0, 0.1, 0.32]} color="#63d8ff" intensity={0.65} distance={4.6} />
+      {/* ── Edge seal weld seams ── */}
+      {[
+        [0,  height / 2 + 0.02, 0.02,  width + 0.18, 0.022, 0.022],
+        [0, -height / 2 - 0.02, 0.02,  width + 0.18, 0.022, 0.022],
+        [-width / 2 - 0.02, 0, 0.02,   0.022, height + 0.04, 0.022],
+        [ width / 2 + 0.02, 0, 0.02,   0.022, height + 0.04, 0.022],
+      ].map(([x, y, z, bw, bh, bd], i) => (
+        <mesh key={i} position={[x, y, z]} castShadow receiveShadow>
+          <boxGeometry args={[bw, bh, bd]} />
+          <meshStandardMaterial color="#151c24" roughness={0.7} metalness={0.72} />
+        </mesh>
+      ))}
+
+      {/* ── Soft forward ambient from the viewport glow ── */}
+      <pointLight position={[0, 0.1, 0.45]} color="#63d8ff" intensity={0.55} distance={5.2} />
+      <pointLight position={[0, 0.1, 0.45]} color="#ffffff" intensity={0.12} distance={3.0} />
     </group>
   )
 }
