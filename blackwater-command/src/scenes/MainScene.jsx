@@ -16,21 +16,10 @@ export const IS_QUEST  = /OculusBrowser|Quest/.test(navigator.userAgent)
 export const IS_MOBILE = /Android|iPhone|iPad/.test(navigator.userAgent)
 export const IS_LOW    = IS_QUEST || IS_MOBILE
 
-// Post-processing only on desktop
-let EffectComposer, Bloom, Vignette, ChromaticAberration, BlendFunction
-if (!IS_LOW) {
-  try {
-    const pp  = await import('@react-three/postprocessing')
-    const bf  = await import('postprocessing')
-    EffectComposer      = pp.EffectComposer
-    Bloom               = pp.Bloom
-    Vignette            = pp.Vignette
-    ChromaticAberration = pp.ChromaticAberration
-    BlendFunction       = bf.BlendFunction
-  } catch(e) {
-    console.warn('Post-processing unavailable:', e)
-  }
-}
+// Post-processing — desktop only, imported normally (no top-level await)
+// On Quest/mobile ScenePostFX returns null before these are used
+import { EffectComposer, Bloom, Vignette, ChromaticAberration } from '@react-three/postprocessing'
+import { BlendFunction } from 'postprocessing'
 
 const PERISCOPE_FOV = 22
 const NORMAL_FOV    = 60
@@ -267,7 +256,8 @@ function XRScene() {
 // ─── Post FX — desktop only ───────────────────────────────────────────────────
 function ScenePostFX({ bloomIntensity, vignetteDarkness, periscopeMode, isInterior, detonation, alarm }) {
   const { isPresenting } = useXR()
-  if (IS_LOW || isPresenting || !EffectComposer) return null
+  // Skip ALL post-processing on Quest/mobile — multi-pass FBOs black-screen Adreno/Mali GPUs
+  if (IS_LOW || isPresenting) return null
   return (
     <EffectComposer>
       <Bloom intensity={bloomIntensity} luminanceThreshold={periscopeMode?0.5:isInterior?0.78:detonation?0.15:0.6} luminanceSmoothing={0.92} mipmapBlur />
