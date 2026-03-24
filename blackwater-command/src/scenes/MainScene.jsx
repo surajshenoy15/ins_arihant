@@ -5,6 +5,7 @@ import { createXRStore, XR, useXR } from '@react-three/xr'
 import * as THREE from 'three'
 
 import UnderwaterEnvironment from '../components/Environment/UnderwaterEnvironment'
+import VRControlPanel from '../components/HUD/VRControlPanel'
 import SubmarineInterior from '../components/Interior/SubmarineInterior'
 import SubmarineExterior from '../components/Interior/SubmarineExterior'
 import PlayerController from '../components/Interior/PlayerController'
@@ -232,23 +233,44 @@ function ExteriorScene() {
 }
 
 function XRScene() {
-  const isInterior = useGameStore(s => s.viewMode === VIEW_MODES.INTERIOR || s.viewMode === 'interior')
+  const vm = useGameStore(s => s.viewMode)
+  const isInterior = vm === VIEW_MODES.INTERIOR || vm === 'interior'
+
+  // Force interior on first VR entry
+  useEffect(() => {
+    const cur = useGameStore.getState().viewMode
+    if (cur !== VIEW_MODES.INTERIOR && cur !== 'interior') {
+      useGameStore.getState().setViewMode(VIEW_MODES.INTERIOR)
+    }
+  }, [])
+
   return (
     <>
       <color attach="background" args={['#06131f']} />
       <ambientLight intensity={1.2} color="#b4d6ee" />
       <directionalLight position={[20,30,10]} intensity={1.4} color="#fff5d8" castShadow={false} />
+
+      {/* Drive controls work in VR too */}
+      <SubmarineDriver />
+
       {isInterior ? (
         <>
+          <PlayerController />
           <SubHullSway><SubmarineInterior /></SubHullSway>
-          <group position={[0,-18,-42]} scale={[1.8,1.8,1.8]}><OceanRig><UnderwaterEnvironment /></OceanRig></group>
+          <group position={[0,-18,-42]} scale={[1.8,1.8,1.8]}>
+            <OceanRig><UnderwaterEnvironment /></OceanRig>
+          </group>
         </>
       ) : (
         <>
           <SubMovingRig><SubmarineExterior /></SubMovingRig>
           <OceanRig><UnderwaterEnvironment /></OceanRig>
+          <directionalLight position={[55,85,28]} intensity={1.1} color="#fff5d8" castShadow={false} />
         </>
       )}
+
+      {/* 3D floating control panel — visible in VR, follows controller gaze */}
+      <VRControlPanel />
     </>
   )
 }
