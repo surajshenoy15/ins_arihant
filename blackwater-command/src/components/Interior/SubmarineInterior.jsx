@@ -769,24 +769,114 @@ function ThermalMonitorScreen({ position, rotation = [0, 0, 0] }) {
 }
 
 // ─── Forward Viewport ─────────────────────────────────────────────────────────
-function ForwardViewport({ position = [0, 0.95, -2.72], width = 2.9, height = 2.15 }) {
+function ForwardViewport({ position = [0, 1.02, -2.66], width = 2.95, height = 2.05 }) {
   const depth = useGameStore(s => s.depth)
-  const glow = THREE.MathUtils.clamp(Math.abs(depth) / 80, 0.25, 1)
+  const heading = useGameStore(s => s.heading)
+  const speed = useGameStore(s => s.speed)
+
+  const glassRef = useRef()
+  const sheenRef = useRef()
+
+  useFrame(({ clock }) => {
+    const t = clock.elapsedTime
+    const depthGlow = THREE.MathUtils.clamp(Math.abs(depth) / 120, 0.18, 0.7)
+    const speedGlow = THREE.MathUtils.clamp((speed ?? 0) / 12, 0, 0.35)
+    const pulse = 0.92 + Math.sin(t * 0.8) * 0.04
+
+    if (glassRef.current) {
+      glassRef.current.emissiveIntensity = (0.06 + depthGlow * 0.12 + speedGlow * 0.08) * pulse
+      glassRef.current.opacity = 0.16
+    }
+
+    if (sheenRef.current) {
+      sheenRef.current.opacity = 0.1 + Math.sin(t * 0.6 + heading * 0.01) * 0.03
+    }
+  })
+
   return (
     <group position={position}>
+      {/* outer frame */}
       <mesh castShadow receiveShadow>
-        <planeGeometry args={[width + 0.3, height + 0.3]} />
-        <meshStandardMaterial color="#202730" roughness={0.52} metalness={0.82} />
+        <boxGeometry args={[width + 0.24, height + 0.22, 0.12]} />
+        <meshStandardMaterial color="#1c242d" roughness={0.5} metalness={0.88} />
       </mesh>
-      <mesh position={[0, 0, 0.03]}>
+
+      {/* inset dark gasket */}
+      <mesh position={[0, 0, 0.028]} castShadow receiveShadow>
+        <boxGeometry args={[width + 0.04, height + 0.04, 0.03]} />
+        <meshStandardMaterial color="#070b10" roughness={0.95} metalness={0.18} />
+      </mesh>
+
+      {/* main transparent glass */}
+      <mesh position={[0, 0, 0.05]}>
         <planeGeometry args={[width, height]} />
-        <meshPhysicalMaterial color="#0c2130" roughness={0.08} metalness={0.02} transmission={0.72} thickness={0.55} transparent opacity={0.58} emissive="#0d4460" emissiveIntensity={0.22 * glow} />
+        <meshPhysicalMaterial
+          ref={glassRef}
+          color="#bfe9ff"
+          roughness={0.03}
+          metalness={0.0}
+          transmission={0.96}
+          thickness={0.08}
+          transparent
+          opacity={0.16}
+          ior={1.12}
+          reflectivity={0.22}
+          envMapIntensity={0.45}
+          clearcoat={1}
+          clearcoatRoughness={0.04}
+          emissive="#3dbdff"
+          emissiveIntensity={0.08}
+        />
       </mesh>
-      <pointLight position={[0, 0, 0.25]} color="#59d8ff" intensity={1.1 * glow} distance={5.2} />
+
+      {/* subtle reflection streak */}
+      <mesh position={[0, 0.08, 0.056]}>
+        <planeGeometry args={[width * 0.9, height * 0.22]} />
+        <meshBasicMaterial
+          ref={sheenRef}
+          color="#dff6ff"
+          transparent
+          opacity={0.1}
+          blending={THREE.AdditiveBlending}
+        />
+      </mesh>
+
+      {/* horizontal brace top */}
+      <mesh position={[0, height / 2 - 0.14, 0.062]} castShadow receiveShadow>
+        <boxGeometry args={[width - 0.08, 0.04, 0.025]} />
+        <meshStandardMaterial color="#2a323c" roughness={0.55} metalness={0.82} />
+      </mesh>
+
+      {/* horizontal brace bottom */}
+      <mesh position={[0, -height / 2 + 0.14, 0.062]} castShadow receiveShadow>
+        <boxGeometry args={[width - 0.08, 0.04, 0.025]} />
+        <meshStandardMaterial color="#2a323c" roughness={0.55} metalness={0.82} />
+      </mesh>
+
+      {/* center divider */}
+      <mesh position={[0, 0, 0.062]} castShadow receiveShadow>
+        <boxGeometry args={[0.045, height - 0.1, 0.025]} />
+        <meshStandardMaterial color="#2a323c" roughness={0.55} metalness={0.82} />
+      </mesh>
+
+      {/* bolts */}
+      {[
+        [-width / 2 - 0.06, height / 2 - 0.08, 0.065],
+        [ width / 2 + 0.06, height / 2 - 0.08, 0.065],
+        [-width / 2 - 0.06, -height / 2 + 0.08, 0.065],
+        [ width / 2 + 0.06, -height / 2 + 0.08, 0.065],
+      ].map((p, i) => (
+        <mesh key={i} position={p} castShadow receiveShadow>
+          <cylinderGeometry args={[0.018, 0.018, 0.02, 10]} />
+          <meshStandardMaterial color="#4c5661" roughness={0.38} metalness={0.95} />
+        </mesh>
+      ))}
+
+      {/* soft blue forward visibility glow */}
+      <pointLight position={[0, 0.1, 0.32]} color="#63d8ff" intensity={0.65} distance={4.6} />
     </group>
   )
 }
-
 function SideViewport({ position, size = 0.52 }) {
   return (
     <group position={position}>
