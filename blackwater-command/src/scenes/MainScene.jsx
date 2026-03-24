@@ -1,7 +1,7 @@
-import React, { useRef, Suspense, useEffect } from 'react'
+import React, { useRef, Suspense, useEffect, useState } from 'react'
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { OrbitControls } from '@react-three/drei'
-import { createXRStore, XR } from '@react-three/xr'
+import { createXRStore, XR, useXR } from '@react-three/xr'
 import { EffectComposer, Bloom, Vignette, ChromaticAberration } from '@react-three/postprocessing'
 import { BlendFunction } from 'postprocessing'
 import * as THREE from 'three'
@@ -17,7 +17,7 @@ const xrStore = createXRStore({
   hand: true,
   controller: true,
   sessionInit: {
-    optionalFeatures: ['local-floor', 'bounded-floor', 'hand-tracking', 'layers'],
+    optionalFeatures: ['local-floor', 'hand-tracking'],
   },
 })
 
@@ -74,14 +74,12 @@ function SubmarineDriver() {
   useFrame((_, delta) => {
     const k = keys.current
 
-    // throttle
     let throttleTarget = 0
     if (k.ArrowUp) throttleTarget = 1
     else if (k.ArrowDown) throttleTarget = -0.45
 
     throttle.current = THREE.MathUtils.lerp(throttle.current, throttleTarget, delta * 1.8)
 
-    // speed inertia
     const maxForward = 18
     const maxReverse = -5
     const desiredSpeed =
@@ -94,7 +92,6 @@ function SubmarineDriver() {
 
     if (Math.abs(speed.current) < 0.03) speed.current = 0
 
-    // yaw inertia
     let rudder = 0
     if (k.ArrowLeft) rudder = -1
     if (k.ArrowRight) rudder = 1
@@ -105,7 +102,6 @@ function SubmarineDriver() {
     yawRate.current = THREE.MathUtils.lerp(yawRate.current, targetYawRate, delta * 2.2)
     heading.current = (heading.current + yawRate.current * 60 * delta + 360) % 360
 
-    // dive / ascend
     let planeInput = 0
     if (k.KeyQ || k.Space) planeInput = -1
     if (k.KeyE || k.ShiftLeft) planeInput = 1
@@ -125,7 +121,6 @@ function SubmarineDriver() {
     depth.current += depthVel.current * delta
     depth.current = THREE.MathUtils.clamp(depth.current, -450, 2)
 
-    // movement
     const hdgRad = THREE.MathUtils.degToRad(heading.current)
     const forwardX = Math.cos(hdgRad)
     const forwardZ = Math.sin(hdgRad)
@@ -171,21 +166,17 @@ function SubMovingRig({ children }) {
 
     ref.current.position.copy(sharedSubPosition)
 
-    // bank from turning / speed feel
     const bankTarget = THREE.MathUtils.clamp(speed / 18, -1, 1) * 0.02
     bankRef.current = THREE.MathUtils.lerp(bankRef.current, bankTarget, delta * 1.2)
 
-    // pitch from vertical motion
     const verticalDelta = sharedSubPosition.y - lastPos.current.y
     const pitchTarget = THREE.MathUtils.clamp(verticalDelta * 2.4, -0.08, 0.08)
     pitchRef.current = THREE.MathUtils.lerp(pitchRef.current, pitchTarget, delta * 2.0)
 
-    // ocean sway
     const t = performance.now() * 0.001
     const sway = 0.004 * (0.2 + (surfaceWaveIntensity ?? 0) * 0.8)
     const oceanRoll = Math.sin(t * 0.4) * sway
 
-    // IMPORTANT: model nose is +X, so yaw must be -hdgRad
     ref.current.rotation.set(
       pitchRef.current,
       -hdgRad,
@@ -203,6 +194,7 @@ function ExteriorCameraChase() {
   const { camera } = useThree()
   const followCamPos = useRef(new THREE.Vector3(18, 9, 22))
   const playerDriving = useGameStore(s => s.playerDriving)
+  const { isPresenting } = useXR()
 
   useEffect(() => {
     camera.position.set(18, 9, 22)
@@ -210,6 +202,8 @@ function ExteriorCameraChase() {
   }, [camera])
 
   useFrame((_, delta) => {
+    if (isPresenting) return
+
     const { heading } = useGameStore.getState()
     const hdgRad = THREE.MathUtils.degToRad(heading)
 
@@ -232,6 +226,8 @@ function ExteriorCameraChase() {
 
     controlsRef.current.update()
   })
+
+  if (isPresenting) return null
 
   return (
     <OrbitControls
@@ -291,10 +287,13 @@ function GameTick() {
 
 function PeriscopeCameraController({ active }) {
   const { camera } = useThree()
+  const { isPresenting } = useXR()
   const lerpedFov = useRef(NORMAL_FOV)
   const periscopeHdg = useGameStore(s => s.periscopeHeading)
 
   useFrame(() => {
+    if (isPresenting) return
+
     if (!active) {
       lerpedFov.current = THREE.MathUtils.lerp(lerpedFov.current, NORMAL_FOV, 0.1)
       camera.fov = lerpedFov.current
@@ -352,6 +351,7 @@ function PeriscopeScene() {
     </>
   )
 }
+
 function ExteriorScene() {
   return (
     <>
@@ -380,9 +380,86 @@ function ExteriorScene() {
 }
 
 function VRButton() {
+  const [supported, setSupported] = useState(false)
+  const [checking, setChecking] = useState(true)
+  const [entering, setEntering] = useState(false)
+
+  useEffect(() => {
+    let mounted = true
+
+    async function checkXR() {
+      try {
+        if (!navigator.xr) {
+          if (mounted) {
+            setSupported(false)
+            setChecking(false)
+          }
+          return
+        }
+
+        const ok = await navigator.xr.isSessionSupported('immersive-vr')
+        if (mounted) {
+          setSupported(ok)
+          setChecking(false)
+        }
+      } catch (err) {
+        console.error('XR support check failed:', err)
+        if (mounted) {
+          setSupported(false)
+          setChecking(false)
+        }
+      }
+    }
+
+    checkXR()
+
+    return () => {
+      mounted = false
+    }
+  }, [])
+
+  const handleEnterVR = async () => {
+    try {
+      setEntering(true)
+      await xrStore.enterVR()
+    } catch (err) {
+      console.error('Failed to enter VR:', err)
+      alert(`Failed to enter VR: ${err?.message || err}`)
+    } finally {
+      setEntering(false)
+    }
+  }
+
+  if (checking) {
+    return (
+      <button
+        disabled
+        style={{
+          position: 'fixed',
+          bottom: 28,
+          right: 28,
+          zIndex: 500,
+          padding: '10px 22px',
+          background: 'rgba(0,4,16,0.92)',
+          border: '1px solid rgba(0,229,255,0.4)',
+          borderRadius: 6,
+          color: '#00e5ff',
+          fontFamily: '"Share Tech Mono", monospace',
+          fontSize: 11,
+          letterSpacing: 2,
+        }}
+      >
+        CHECKING XR...
+      </button>
+    )
+  }
+
+  if (!supported) return null
+
   return (
     <button
-      onClick={() => xrStore.enterVR()}
+      onClick={handleEnterVR}
+      disabled={entering}
       style={{
         position: 'fixed',
         bottom: 28,
@@ -400,8 +477,57 @@ function VRButton() {
         backdropFilter: 'blur(8px)',
       }}
     >
-      🥽 ENTER VR
+      {entering ? 'ENTERING VR...' : '🥽 ENTER VR'}
     </button>
+  )
+}
+
+function ScenePostFX({
+  bloomIntensity,
+  vignetteDarkness,
+  periscopeMode,
+  isInterior,
+  detonation,
+  alarm,
+}) {
+  const { isPresenting } = useXR()
+
+  if (isPresenting) return null
+
+  return (
+    <EffectComposer>
+      <Bloom
+        intensity={bloomIntensity}
+        luminanceThreshold={
+          periscopeMode
+            ? 0.5
+            : isInterior
+              ? 0.78
+              : detonation
+                ? 0.15
+                : 0.6
+        }
+        luminanceSmoothing={0.92}
+        mipmapBlur
+      />
+      <Vignette
+        offset={0.22}
+        darkness={vignetteDarkness}
+        blendFunction={BlendFunction.NORMAL}
+      />
+      <ChromaticAberration
+        offset={
+          periscopeMode
+            ? new THREE.Vector2(0.001, 0.001)
+            : detonation
+              ? new THREE.Vector2(0.008, 0.008)
+              : alarm
+                ? new THREE.Vector2(0.002, 0.002)
+                : new THREE.Vector2(0.0002, 0.0002)
+        }
+        blendFunction={BlendFunction.NORMAL}
+      />
+    </EffectComposer>
   )
 }
 
@@ -458,19 +584,25 @@ export default function MainScene() {
 
   return (
     <>
-      {'xr' in navigator && <VRButton />}
+      <VRButton />
 
       <Canvas
         gl={{
           antialias: true,
+          alpha: false,
+          powerPreference: 'high-performance',
           toneMapping: THREE.ACESFilmicToneMapping,
           toneMappingExposure: exposure,
           outputColorSpace: THREE.SRGBColorSpace,
           xrCompatible: true,
         }}
+        dpr={[1, 1.5]}
         camera={{ fov: cameraFov, near: 0.05, far: 600, position: cameraPos }}
         shadows
         style={{ position: 'fixed', inset: 0, background: '#000810' }}
+        onCreated={({ gl }) => {
+          gl.xr.enabled = true
+        }}
       >
         <XR store={xrStore}>
           <Suspense
@@ -489,39 +621,14 @@ export default function MainScene() {
             {isInterior && periscopeMode && <PeriscopeScene />}
             {!isInterior && <ExteriorScene />}
 
-            <EffectComposer>
-              <Bloom
-                intensity={bloomIntensity}
-                luminanceThreshold={
-                  periscopeMode
-                    ? 0.5
-                    : isInterior
-                      ? 0.78
-                      : detonation
-                        ? 0.15
-                        : 0.6
-                }
-                luminanceSmoothing={0.92}
-                mipmapBlur
-              />
-              <Vignette
-                offset={0.22}
-                darkness={vignetteDarkness}
-                blendFunction={BlendFunction.NORMAL}
-              />
-              <ChromaticAberration
-                offset={
-                  periscopeMode
-                    ? new THREE.Vector2(0.001, 0.001)
-                    : detonation
-                      ? new THREE.Vector2(0.008, 0.008)
-                      : alarm
-                        ? new THREE.Vector2(0.002, 0.002)
-                        : new THREE.Vector2(0.0002, 0.0002)
-                }
-                blendFunction={BlendFunction.NORMAL}
-              />
-            </EffectComposer>
+            <ScenePostFX
+              bloomIntensity={bloomIntensity}
+              vignetteDarkness={vignetteDarkness}
+              periscopeMode={periscopeMode}
+              isInterior={isInterior}
+              detonation={detonation}
+              alarm={alarm}
+            />
           </Suspense>
         </XR>
       </Canvas>
