@@ -6,7 +6,7 @@
 import React, { useRef, useState, useCallback, useEffect } from 'react'
 import { useFrame } from '@react-three/fiber'
 import { Text } from '@react-three/drei'
-import { useXR, useController } from '@react-three/xr'
+import { useXR } from '@react-three/xr'
 import * as THREE from 'three'
 import { useGameStore, LIGHT_MODES, VIEW_MODES } from '../../stores/gameStore'
 import { speakReactive, indraVoice } from '../../systems/AIAssistant'
@@ -68,18 +68,8 @@ function VRButton({ position, label, sublabel, color = '#00e5ff', onPress, activ
   )
 }
 
-// ─── Controller Ray Interaction ───────────────────────────────────────────────
-function ControllerRays() {
-  const leftCtrl  = useController('left')
-  const rightCtrl = useController('right')
-
-  useFrame(() => {
-    // Visual ray from controllers — just use default XR pointer from @react-three/xr
-    // Interaction is handled by onPointerDown on the mesh objects above
-  })
-
-  return null
-}
+// Controller interaction is handled by @react-three/xr's built-in pointer system
+// via onPointerDown on mesh objects — no manual ray setup needed
 
 // ─── Throttle slider ──────────────────────────────────────────────────────────
 function ThrottleSlider({ position }) {
@@ -288,7 +278,6 @@ export default function VRControlPanel() {
 
   return (
     <group ref={groupRef}>
-      <ControllerRays />
 
       {/* ── Status panel ── */}
       <VRStatusDisplay position={[0, 0.14, 0]} />
